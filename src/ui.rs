@@ -262,6 +262,53 @@ fn render_table(f: &mut Frame, app: &mut App, area: Rect) {
             f.render_stateful_widget(table, area, st);
             st.select(Some(selected));
         }
+        Tab::Status => {
+            let Some(snap) = app.snapshot.as_ref() else {
+                f.render_widget(block_with_title(" status codes "), area);
+                return;
+            };
+            let widths = [
+                Constraint::Length(6),
+                Constraint::Length(9),
+                Constraint::Length(8),
+                Constraint::Min(10),
+            ];
+            let header = Row::new(["code", "count", "%", "share"]).style(header_style);
+            let total = snap.count.max(1) as f64;
+            let max = snap
+                .statuses
+                .first()
+                .map(|(_, c)| *c)
+                .unwrap_or(1)
+                .max(1) as f64;
+            let rows: Vec<Row<'static>> = snap
+                .statuses
+                .iter()
+                .map(|(code, count)| {
+                    let bar = ((*count as f64 / max) * 30.0).round() as usize;
+                    Row::new(vec![
+                        Cell::from(code.to_string())
+                            .style(Style::new().fg(status_color(Some(*code))).bold()),
+                        Cell::from(fmt_count(*count)),
+                        Cell::from(format!("{:.1}%", *count as f64 / total * 100.0)),
+                        Cell::from("█".repeat(bar)).style(Style::new().fg(status_color(Some(
+                            *code,
+                        )))),
+                    ])
+                })
+                .collect();
+            let ti = tab.index();
+            let title = format!(
+                " status codes  {} requests in {}s window ",
+                fmt_count(snap.count),
+                snap.window_secs
+            );
+            let table = Table::new(rows, widths)
+                .header(header)
+                .block(block_with_title(&title))
+                .row_highlight_style(Style::new().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+            f.render_stateful_widget(table, area, &mut app.table_states[ti]);
+        }
         _ => {
             let widths = [
                 Constraint::Length(4),
