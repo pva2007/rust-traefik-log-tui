@@ -40,8 +40,6 @@ pub struct DnsCache {
     /// IPs of the observed virtual hosts (RequestHost): traffic from these
     /// is the server talking to itself.
     self_ips: HashSet<IpAddr>,
-    /// registrable domains (last two labels) of the observed virtual hosts
-    host_domains: HashSet<String>,
     request_tx: mpsc::Sender<Request>,
     answer_rx: mpsc::Receiver<Answer>,
 }
@@ -58,7 +56,6 @@ impl DnsCache {
             hosts_done: HashSet::new(),
             ttl: Duration::hours(ttl_hours.clamp(1, 720) as i64),
             self_ips: HashSet::new(),
-            host_domains: HashSet::new(),
             request_tx,
             answer_rx,
         }
@@ -99,9 +96,6 @@ impl DnsCache {
                 }
                 Answer::Host(host, ips) => {
                     self.hosts_pending.remove(&host);
-                    if let Some(domain) = registrable_domain(&host) {
-                        self.host_domains.insert(domain);
-                    }
                     self.hosts_done.insert(host);
                     self.self_ips.extend(ips);
                 }
@@ -119,18 +113,12 @@ impl DnsCache {
     }
 
     /// True if `ip` is one of the addresses the observed virtual hosts
-    /// resolve to, or its own forward-confirmed PTR name shares the domain
-    /// of an observed host: in both cases this client is (an address of)
-    /// the server itself, e.g. a second interface of a multi-homed host.
+    /// resolve to: a client whose address equals the address of the host
+    /// it requested is the server itself (or shares that address).
+    /// No other inference is made — a PTR name, however similar, is not
+    /// evidence of co-location.
     pub fn is_self(&self, ip: IpAddr) -> bool {
-        if self.self_ips.contains(&ip) {
-            return true;
-        }
-        self.entries
-            .get(&ip)
-            .and_then(|e| e.name.as_deref())
-            .and_then(registrable_domain)
-            .is_some_and(|d| self.host_domains.contains(&d))
+        self.self_ips.contains(&ip)
     }
 
     pub fn invalidate(&mut self) {
@@ -146,20 +134,6 @@ impl DnsCache {
 
 /// Non-global single-host addresses: loopback, RFC1918, link-local, docker
 /// bridges and such. Clients from these are the machine itself or its LAN.
-/// Last two labels of a hostname, lowercased ("git.valicek.de" ->
-/// "valicek.de"). Skips IP literals and names with fewer than two labels.
-fn registrable_domain(name: &str) -> Option<String> {
-    let name = name.trim_end_matches('.').to_ascii_lowercase();
-    if name.parse::<IpAddr>().is_ok() {
-        return None;
-    }
-    let labels: Vec<&str> = name.split('.').collect();
-    if labels.len() < 2 {
-        return None;
-    }
-    Some(labels[labels.len() - 2..].join("."))
-}
-
 pub fn is_local_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
@@ -295,30 +269,6 @@ mod tests {
         c.hosts_done.insert("mail.example".to_string());
         c.ensure_host("mail.example");
         assert!(c.hosts_pending.is_empty());
-    }
-
-    #[test]
-    fn self_by_ptr_domain() {
-        let mut c = DnsCache::new(1);
-        let ip: IpAddr = "152.53.3.227".parse().unwrap();
-        c.entries.insert(ip, entry(Some("mail.valicek.de")));
-        // PTR shares a domain with an observed host -> same machine,
-        // even though no observed host resolves to this address
-        assert!(!c.is_self(ip));
-        c.host_domains.insert("valicek.de".into());
-        assert!(c.is_self(ip));
-        // an unrelated PTR domain is not self
-        let other: IpAddr = "91.33.28.80".parse().unwrap();
-        c.entries.insert(other, entry(Some("p5b211c50.dip0.t-ipconnect.de")));
-        assert!(!c.is_self(other));
-    }
-
-    #[test]
-    fn registrable_domain_basics() {
-        assert_eq!(registrable_domain("git.valicek.de").as_deref(), Some("valicek.de"));
-        assert_eq!(registrable_domain("MAIL.Cdn21.de.").as_deref(), Some("cdn21.de"));
-        assert_eq!(registrable_domain("91.107.197.42"), None);
-        assert_eq!(registrable_domain("localhost"), None);
     }
 
     #[test]

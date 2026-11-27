@@ -64,12 +64,17 @@ traefik-logs --print-stats --stats-window 300 sample/
 
 With reverse DNS enabled, client names carry two markers:
 
-- `[self]` — the client IP is the server itself (internal traffic through
-  Traefik, e.g. webmail hitting its own backend). Detected by matching the
-  client IP against the addresses of the observed virtual hosts, or by its
-  forward-confirmed PTR name sharing a domain with an observed host.
+- `[self]` — shown only when the client IP exactly equals an address that
+  one of the observed `RequestHost` names resolves to: that client
+  connected to itself, i.e. internal traffic through Traefik. PTR names
+  are never used for this — a similar name is not evidence that two
+  addresses sit on the same machine.
 - `[local]` — non-routed address (loopback, RFC1918, docker, link-local);
   shown in the detail view, dropped in table cells to save columns.
+
+Note that host-name resolution happens from the machine running the TUI.
+If that host uses split-horizon DNS, the resolved addresses may differ
+from the server's view.
 
 ## Filter syntax
 
