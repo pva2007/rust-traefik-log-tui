@@ -1,0 +1,78 @@
+name: Release
+
+# Build release binaries for Linux x86_64 (amd64) and aarch64 (arm64) and
+# publish them on a GitHub release. Triggered by pushing a version tag (v*)
+# or manually via workflow_dispatch.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+          - target: aarch64-unknown-linux-musl
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Cross-compile from the Ubuntu runner via zig (musl = fully static
+      # binaries, no runtime deps on the target host).
+      - name: Install zig
+        run: python3 -m pip install ziglang
+
+      - name: Build
+        shell: bash
+        run: |
+          cargo install --locked cargo-zigbuild
+          cargo zigbuild --release --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          dir="traefik-logs-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir "$dir"
+          cp "target/${{ matrix.target }}/release/traefik-logs" "$dir/"
+          cp README.md "$dir/"
+          tar czf "$dir.tar.gz" "$dir"
+          shasum -a 256 "$dir.tar.gz" > "$dir.tar.gz.sha256"
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            traefik-logs-*.tar.gz
+            traefik-logs-*.tar.gz.sha256
+          generate_release_notes: true
+
+      - name: Upload build artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: traefik-logs-${{ matrix.target }}
+          path: |
+            traefik-logs-*.tar.gz
+            traefik-logs-*.tar.gz.sha256
