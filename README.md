@@ -31,7 +31,7 @@ traefik-logs sample/
 traefik-logs -n 5000 /var/log/traefik
 
 # start filtered (same syntax as the in-app prompt)
-traefik-logs -F 'errors host:bao.valicek.de'
+traefik-logs -F 'errors host:example.de'
 ```
 
 Polling-based (no inotify), 250 ms interval, so it also works over sshfs/nfs
