@@ -62,6 +62,15 @@ traefik-logs --print-stats --stats-window 300 sample/
 | `?` | help |
 | `q` | quit |
 
+With reverse DNS enabled, client names carry two markers:
+
+- `[self]` — the client IP is the server itself (internal traffic through
+  Traefik, e.g. webmail hitting its own backend). Detected by matching the
+  client IP against the addresses of the observed virtual hosts, or by its
+  forward-confirmed PTR name sharing a domain with an observed host.
+- `[local]` — non-routed address (loopback, RFC1918, docker, link-local);
+  shown in the detail view, dropped in table cells to save columns.
+
 ## Filter syntax
 
 Space-separated tokens, AND-combined:

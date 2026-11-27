@@ -217,7 +217,8 @@ impl App {
             Vec::new()
         };
         let snap = snapshot(&entries, window, now, 100);
-        // warm up DNS for the top talkers (and keep the previous set warm)
+        // warm up DNS for the top talkers (and keep the previous set warm),
+        // and resolve the observed virtual hosts to detect self traffic
         if let Some(dns) = &mut self.dns {
             for key in dns_keys {
                 if let Ok(ip) = key.parse() {
@@ -229,28 +230,60 @@ impl App {
                     dns.ensure(ip);
                 }
             }
+            for h in &snap.top_hosts {
+                let host = h.key.split(':').next().unwrap_or(&h.key);
+                dns.ensure_host(host);
+            }
             dns.drain();
         }
         self.snapshot = Some(snap);
     }
 
-    pub fn display_name(&self, ip: &str) -> String {
+    fn label_for(&self, ip: &str) -> String {
         if let Some(dns) = &self.dns
             && let Ok(addr) = ip.parse::<std::net::IpAddr>()
-                && let Some(name) = dns.get(addr, Utc::now()) {
-                    return format!("{name} ({ip})");
-                }
+            && let Some(name) = dns.get(addr, Utc::now())
+        {
+            return format!("{name} ({ip})");
+        }
         ip.to_string()
     }
 
-    /// Short form for table cells: resolved name if known, else the IP.
+    /// Suffix marking self-traffic (the client IP is one of the observed
+    /// virtual hosts) and non-routed addresses (loopback, RFC1918, docker).
+    fn self_local_suffix(&self, ip: &str) -> &'static str {
+        let Ok(addr) = ip.parse::<std::net::IpAddr>() else {
+            return "";
+        };
+        if self.dns.as_ref().is_some_and(|d| d.is_self(addr)) {
+            " [self]"
+        } else if crate::dns::is_local_ip(addr) {
+            " [local]"
+        } else {
+            ""
+        }
+    }
+
+    pub fn display_name(&self, ip: &str) -> String {
+        format!("{}{}", self.label_for(ip), self.self_local_suffix(ip))
+    }
+
+    /// Short form for table cells: resolved name if known, else the IP,
+    /// plus the self marker (the [local] tag is omitted to save columns).
     pub fn display_short(&self, ip: &str) -> String {
-        if let Some(dns) = &self.dns
+        let base = if let Some(dns) = &self.dns
             && let Ok(addr) = ip.parse::<std::net::IpAddr>()
-                && let Some(name) = dns.get(addr, Utc::now()) {
-                    return name.to_string();
-                }
-        ip.to_string()
+            && let Some(name) = dns.get(addr, Utc::now())
+        {
+            name.to_string()
+        } else {
+            ip.to_string()
+        };
+        if self.self_local_suffix(ip) == " [self]" {
+            format!("{base} [self]")
+        } else {
+            base
+        }
     }
 
     fn selected(&self, tab: Tab) -> Option<usize> {
